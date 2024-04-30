@@ -1,4 +1,11 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
-  "idf.adapterTargetName": "esp32s3"
+  "idf.adapterTargetName": "esp32s3",
+  "files.associations": {
+    "*.sdf": "xml",
+    "array": "c",
+    "string": "c",
+    "string_view": "c",
+    "span": "c"
+  }
 }
