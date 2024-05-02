@@ -8,14 +8,15 @@
 #include "driver/gpio.h"
 #include "math.h"
 
-static const int RX_BUF_SIZE = 4096;
 // static int64_t last_call_time = 0;
 
 #define IMU_UART (UART_NUM_1)
 #define IMU_TX (GPIO_NUM_43)
 #define IMU_RX (GPIO_NUM_44)
+#define RX_BUF_SIZE 4096
+#define BUFFER_SIZE 100
 
-#define PATTERN_CHR_NUM (2)
+#define PATTERN_CHR_NUM (1)
 
 typedef struct {
     float roll, pitch, yaw; // 각
@@ -24,6 +25,8 @@ typedef struct {
 } Imu;
 
 Imu imu_data;
+volatile char dataBuffer[BUFFER_SIZE];
+volatile int bufferIndex = 0;
 
 QueueHandle_t uart0_queue;
 int tx_sendData(uart_port_t uart_num, const char* logName, const unsigned char* data, int len);
@@ -43,8 +46,9 @@ void init(void) {
     uart_driver_install(IMU_UART, RX_BUF_SIZE, RX_BUF_SIZE, 10, &uart0_queue, 0);
     uart_param_config(IMU_UART, &imu_uart_config);
     uart_set_pin(IMU_UART, IMU_TX, IMU_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_enable_pattern_det_baud_intr(IMU_UART, '\n', 1, 15, 0, 0);
-    // uart_enable_pattern_det_intr(IMU_UART, 0x0a, 1, 10000, 10, 10);
+    // uart_enable_pattern_det_baud_intr(IMU_UART, '\n', 1, 15, 0, 0);
+    uart_enable_pattern_det_baud_intr(IMU_UART, '\n', PATTERN_CHR_NUM, 10000,0,0);  // '\n' 패턴 감지 활성화
+    uart_pattern_queue_reset(IMU_UART, 20);  // 패턴 큐 사이즈 설정
 }
 
 int tx_sendData(uart_port_t uart_num, const char* logName, const unsigned char* data, int len) {
@@ -79,51 +83,32 @@ static void imu_configuration(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void imu_data_receiver(void *arg) {
-    uart_event_t event;
-    size_t buffered_size;
-    uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE + 1);
-    
-    static const char *RX_TASK_TAG = "RX_TASK";
-    esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
 
-    for (;;) {
+// IMU 데이터를 UART에서 읽고 처리
+void imu_data_receiver(void *pvParameters) {
+    uart_event_t event;
+    uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE);
+    while (true) {
+        // 이벤트 큐에서 이벤트 기다리기
         if (xQueueReceive(uart0_queue, (void*)&event, portMAX_DELAY)) {
+            bzero(data, RX_BUF_SIZE);
             switch (event.type) {
+                // 패턴 감지 이벤트 처리
                 case UART_PATTERN_DET:
-                    // 패턴 감지 시 데이터 읽기
-                    uart_read_bytes(UART_NUM_1, data, 82, portMAX_DELAY);
-                    data[82] = '\0';  // NULL 종료 문자 추가
-                    process_data(data);  // 데이터 처리 함수
+                    uart_get_buffered_data_len(IMU_UART, &event.size);
+                    int pos = uart_pattern_pop_pos(IMU_UART);
+                    uart_read_bytes(IMU_UART, data, pos + 1, 100 / portTICK_PERIOD_MS);
+                    data[pos] = '\0';  // NULL 종료 문자 추가
+                    ESP_LOGI("UART", "Received: %s", data);
+                    // 여기서 데이터 처리 로직 구현
                     break;
                 default:
+                    ESP_LOGI("UART", "Unhandled event type: %d", event.type);
                     break;
             }
         }
     }
     free(data);
-}
-
-void process_data(uint8_t* data) {
-    // int64_t current_time = esp_timer_get_time();
-    // if (last_call_time != 0) {
-    //     int64_t time_diff = current_time - last_call_time;
-    //     ESP_LOGI("process_data", "Time since last call: %lld microseconds", time_diff);
-    // }
-    // last_call_time = current_time;
-    // 데이터 파싱 및 처리 로직
-    char temp[9]; // 8 바이트 데이터 + NULL
-    double values[9]; // 9개의 수치 데이터 저장
-    char *token = strtok((char *)data, " "); // 첫 번째 토큰
-    int idx = 0;
-
-    while (token != NULL && idx < 9) {
-        strncpy(temp, token, 8); // 데이터 복사
-        temp[8] = '\0'; // NULL 종료
-        values[idx++] = atof(temp); // 변환 후 저장
-        token = strtok(NULL, " "); // 다음 토큰
-        // printf("data: %f", values[idx]);
-    }
 }
 
 void app_main(void) {
