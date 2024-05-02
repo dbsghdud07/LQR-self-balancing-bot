@@ -28,6 +28,9 @@ Imu imu_data;
 volatile char dataBuffer[BUFFER_SIZE];
 volatile int bufferIndex = 0;
 
+float values[9];
+int count = 0;
+
 QueueHandle_t uart0_queue;
 int tx_sendData(uart_port_t uart_num, const char* logName, const unsigned char* data, int len);
 static void imu_configuration(void *arg);
@@ -99,8 +102,8 @@ void imu_data_receiver(void *pvParameters) {
                     int pos = uart_pattern_pop_pos(IMU_UART);
                     uart_read_bytes(IMU_UART, data, pos + 1, 100 / portTICK_PERIOD_MS);
                     data[pos] = '\0';  // NULL 종료 문자 추가
-                    ESP_LOGI("UART", "Received: %s", data);
-                    // 여기서 데이터 처리 로직 구현
+                    // ESP_LOGI("UART", "Received: %s, %d", data, pos);
+                    process_data(data);
                     break;
                 default:
                     ESP_LOGI("UART", "Unhandled event type: %d", event.type);
@@ -109,6 +112,18 @@ void imu_data_receiver(void *pvParameters) {
         }
     }
     free(data);
+}
+
+void process_data(uint8_t* data) {
+    count = sscanf((char*)data, "%8f%8f%8f%8f%8f%8f%8f%8f%8f",
+                   &values[0], &values[1], &values[2], &values[3], &values[4],
+                   &values[5], &values[6], &values[7], &values[8]);
+
+    printf("Parsed data (%d elements):\n", count);
+    for(int i = 0; i < count; i++) {
+        printf("%.3f ", values[i]);
+    }
+    printf("\n");
 }
 
 void app_main(void) {
